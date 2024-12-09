@@ -49,13 +49,12 @@ class User:
         self.chat_id = chat_id
         self.name = name
         self.balance = balance
-        self.bonus_points = 0  # Начисленные бонусы
-
+        self.bonus_points = 0  
     def add_balance(self, amount):
         self.balance += amount
 
     def add_bonus(self, amount):
-        self.bonus_points += amount  # Добавление бонусов
+        self.bonus_points += amount  
 
 
 class Menu:
@@ -102,9 +101,9 @@ class BotApp:
         self.menu = Menu()
         self.users = {}
         self.carts = {}
-        self.waiting_for_removal = {}  # Состояние ожидания удаления
+        self.waiting_for_removal = {}  
 
-        # Подключение обработчиков
+        
         self.setup_handlers()
 
     def setup_handlers(self):
@@ -131,9 +130,9 @@ class BotApp:
             elif message.text == 'Ваши данные':
                 self.show_user_data(message)
             elif message.text == 'Посмотреть баланс':
-                self.show_bonus_balance(message)  # Показываем только бонусы
+                self.show_bonus_balance(message)  
             elif message.text.isdigit():
-                self.process_number_input(message)  # Обработка числового ввода
+                self.process_number_input(message)  
             else:
                 self.bot.send_message(chat_id, "Неизвестная команда. Пожалуйста, выберите доступный вариант.")
 
@@ -154,9 +153,8 @@ class BotApp:
         markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
         markup.add('Меню', 'Посмотреть корзину')
         markup.add('Ваши данные', 'Посмотреть баланс')
-        markup.add('Удалить из корзины', 'Оплата')  # Добавлена кнопка "Удалить из корзины"
-
-        # Отправляем сообщение с клавиатурой
+        markup.add('Удалить из корзины', 'Оплата')  
+       
         self.bot.send_message(chat_id, 'Вы успешно зарегистрированы!', reply_markup=markup)
 
     def show_menu(self, message):
@@ -178,7 +176,7 @@ class BotApp:
         chat_id = message.chat.id
         cart = self.get_cart(chat_id)
         if cart.items:
-            self.waiting_for_removal[chat_id] = True  # Устанавливаем состояние ожидания удаления
+            self.waiting_for_removal[chat_id] = True  
             cart_text = "Корзина:\n" + "\n".join([f"{i+1}) {item}" for i, item in enumerate(cart.items)])
             self.bot.send_message(chat_id, cart_text)
             self.bot.send_message(chat_id, 'Введите номер блюда, чтобы удалить его из корзины.')
@@ -188,23 +186,22 @@ class BotApp:
     def process_number_input(self, message):
         chat_id = message.chat.id
         cart = self.get_cart(chat_id)
-        
 
-        if self.waiting_for_removal.get(chat_id):  # Проверяем, ожидается ли удаление
+        if self.waiting_for_removal.get(chat_id): 
             try:
                 number = int(message.text.strip()) - 1
                 if 0 <= number < len(cart.items):
                     dish_name = cart.items[number]
                     cart.remove_item(dish_name)
                     self.bot.send_message(chat_id, f'Блюдо "{dish_name}" удалено из корзины.')
-                    self.waiting_for_removal[chat_id] = False  # Сбрасываем состояние удаления
-                    self.show_cart(message)  # Показываем обновленную корзину
+                    self.waiting_for_removal[chat_id] = False  
+                    self.show_cart(message)  
                 else:
                     self.bot.send_message(chat_id, 'Неверный номер блюда. Пожалуйста, выберите правильный номер.')
             except ValueError:
                 self.bot.send_message(chat_id, 'Введите корректный номер блюда.')
         else:
-            # Если удаление не ожидалось, добавляем в корзину
+            
             try:
                 number = int(message.text.strip()) - 1
                 if 0 <= number < len(self.menu.items):
