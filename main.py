@@ -238,7 +238,7 @@ class BotApp:
         if total > 0:
             # Начисляем бонусы
             if user:
-                bonus = total * 0.1  # 10% от суммы заказа
+                bonus = total * 0.1 
                 user.add_bonus(bonus)
                 self.bot.send_message(chat_id, f"Вам начислено {bonus:.2f} бонусных рублей! Общий бонусный баланс: {user.bonus_points:.2f} руб.")
 
