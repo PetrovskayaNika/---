@@ -13,7 +13,7 @@ class DatabaseManager:
         conn = sqlite3.connect(self.db_name)
         cur = conn.cursor()
         cur.execute('DROP TABLE IF EXISTS users')
-        cur.execute('''
+        cur.execute(''' 
             CREATE TABLE users(
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 chat_id INTEGER NOT NULL,
@@ -49,9 +49,13 @@ class User:
         self.chat_id = chat_id
         self.name = name
         self.balance = balance
+        self.bonus_points = 0  # Начисленные бонусы
 
     def add_balance(self, amount):
         self.balance += amount
+
+    def add_bonus(self, amount):
+        self.bonus_points += amount  # Добавление бонусов
 
 
 class Menu:
@@ -79,10 +83,9 @@ class Cart:
     def add_item(self, item):
         self.items.append(item)
 
-    def remove_item(self, index):
-        if 0 <= index < len(self.items):
-            return self.items.pop(index)
-        return None
+    def remove_item(self, item):
+        if item in self.items:
+            self.items.remove(item)
 
     def get_total(self, menu):
         return sum(menu[item] for item in self.items if item in menu)
@@ -99,6 +102,7 @@ class BotApp:
         self.menu = Menu()
         self.users = {}
         self.carts = {}
+        self.waiting_for_removal = {}  # Состояние ожидания удаления
 
         # Подключение обработчиков
         self.setup_handlers()
@@ -108,29 +112,30 @@ class BotApp:
         @self.bot.message_handler(commands=['start'])
         def start_command(message):
             chat_id = message.chat.id
-            self.bot.send_message(chat_id, 'Добро пожаловать в наше кафе "Delicious_Moment"!')
-            self.bot.send_message(chat_id, 'Пожалуйста, зарегистрируйтесь. Введите ваше имя:')
+            self.bot.send_message(chat_id, 'Добро пожаловать в наше кафе "Delicious_Moment"! Пройдите регистрацию.')
+            self.bot.send_message(chat_id, 'Введите ваше имя:')
             self.bot.register_next_step_handler(message, self.register_user)
+        
 
         @self.bot.message_handler(content_types=['text'])
         def handle_text(message):
             chat_id = message.chat.id
             if message.text == 'Меню':
                 self.show_menu(message)
-            elif message.text.isdigit():
-                self.add_to_cart(message)
             elif message.text == 'Посмотреть корзину':
                 self.show_cart(message)
+            elif message.text == 'Удалить из корзины':
+                self.remove_from_cart(message)
+            elif message.text == 'Оплата':
+                self.process_payment(message)
             elif message.text == 'Ваши данные':
                 self.show_user_data(message)
             elif message.text == 'Посмотреть баланс':
-                self.show_balance(message)
+                self.show_bonus_balance(message)  # Показываем только бонусы
+            elif message.text.isdigit():
+                self.process_number_input(message)  # Обработка числового ввода
             else:
-                self.bot.send_message(chat_id, 'Неизвестная команда.')
-
-        @self.bot.callback_query_handler(func=lambda call: call.data == "payment")
-        def handle_payment_callback(call):
-            self.process_payment(call.message)
+                self.bot.send_message(chat_id, "Неизвестная команда. Пожалуйста, выберите доступный вариант.")
 
     def register_user(self, message):
         chat_id = message.chat.id
@@ -144,87 +149,117 @@ class BotApp:
         self.database.add_user(chat_id, name, password)
         self.users[chat_id] = User(chat_id, name)
         self.carts[chat_id] = Cart()
-        self.bot.send_message(chat_id, 'Вы успешно зарегистрированы!')
+
+        # Создаем клавиатуру с кнопками
+        markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+        markup.add('Меню', 'Посмотреть корзину')
+        markup.add('Ваши данные', 'Посмотреть баланс')
+        markup.add('Удалить из корзины', 'Оплата')  # Добавлена кнопка "Удалить из корзины"
+
+        # Отправляем сообщение с клавиатурой
+        self.bot.send_message(chat_id, 'Вы успешно зарегистрированы!', reply_markup=markup)
 
     def show_menu(self, message):
         chat_id = message.chat.id
         menu_text = "МЕНЮ:\n" + "\n".join([f"{i+1}) {item} — {price} руб." for i, (item, price) in enumerate(self.menu.items.items())])
         self.bot.send_message(chat_id, menu_text)
-
-    def add_to_cart(self, message):
-        chat_id = message.chat.id
-        cart = self.get_cart(chat_id)
-        menu = self.menu.items
-        dish_number = int(message.text) - 1
-
-        if 0 <= dish_number < len(menu):
-            item = list(menu.keys())[dish_number]
-            cart.add_item(item)
-            self.bot.send_message(chat_id, f'{item} добавлено в корзину.')
+        self.bot.send_message(chat_id, "Введите номер блюда, чтобы добавить его в корзину.")
 
     def show_cart(self, message):
         chat_id = message.chat.id
         cart = self.get_cart(chat_id)
         if cart.items:
             cart_text = "Корзина:\n" + "\n".join([f"{i+1}) {item}" for i, item in enumerate(cart.items)])
-            markup = types.InlineKeyboardMarkup()
-            markup.add(types.InlineKeyboardButton("Оплата", callback_data="payment"))
-            self.bot.send_message(chat_id, cart_text, reply_markup=markup)
+            self.bot.send_message(chat_id, cart_text)
         else:
             self.bot.send_message(chat_id, 'Корзина пуста.')
 
+    def remove_from_cart(self, message):
+        chat_id = message.chat.id
+        cart = self.get_cart(chat_id)
+        if cart.items:
+            self.waiting_for_removal[chat_id] = True  # Устанавливаем состояние ожидания удаления
+            cart_text = "Корзина:\n" + "\n".join([f"{i+1}) {item}" for i, item in enumerate(cart.items)])
+            self.bot.send_message(chat_id, cart_text)
+            self.bot.send_message(chat_id, 'Введите номер блюда, чтобы удалить его из корзины.')
+        else:
+            self.bot.send_message(chat_id, 'Корзина пуста. Удалять нечего.')
+
+    def process_number_input(self, message):
+        chat_id = message.chat.id
+        cart = self.get_cart(chat_id)
+        
+
+        if self.waiting_for_removal.get(chat_id):  # Проверяем, ожидается ли удаление
+            try:
+                number = int(message.text.strip()) - 1
+                if 0 <= number < len(cart.items):
+                    dish_name = cart.items[number]
+                    cart.remove_item(dish_name)
+                    self.bot.send_message(chat_id, f'Блюдо "{dish_name}" удалено из корзины.')
+                    self.waiting_for_removal[chat_id] = False  # Сбрасываем состояние удаления
+                    self.show_cart(message)  # Показываем обновленную корзину
+                else:
+                    self.bot.send_message(chat_id, 'Неверный номер блюда. Пожалуйста, выберите правильный номер.')
+            except ValueError:
+                self.bot.send_message(chat_id, 'Введите корректный номер блюда.')
+        else:
+            # Если удаление не ожидалось, добавляем в корзину
+            try:
+                number = int(message.text.strip()) - 1
+                if 0 <= number < len(self.menu.items):
+                    dish_name = list(self.menu.items.keys())[number]
+                    cart.add_item(dish_name)
+                    self.bot.send_message(chat_id, f'Блюдо "{dish_name}" добавлено в корзину.')
+                else:
+                    self.bot.send_message(chat_id, 'Неверный номер блюда. Пожалуйста, выберите правильный номер.')
+            except ValueError:
+                self.bot.send_message(chat_id, 'Введите корректный номер блюда.')
+
     def show_user_data(self, message):
-        """Отображение данных пользователя."""
         chat_id = message.chat.id
         user = self.users.get(chat_id)
         if user:
-            self.bot.send_message(
-                chat_id,
-                f"Ваши данные:\nИмя: {user.name}\nБонусный баланс: {user.balance:.2f} руб."
-            )
+            self.bot.send_message(chat_id, f"Ваши данные:\nИмя: {user.name}\nБонусный баланс: {user.bonus_points:.2f} руб.")
         else:
             self.bot.send_message(chat_id, "Вы не зарегистрированы. Используйте команду /start для регистрации.")
 
-    def show_balance(self, message):
-        """Отображение баланса пользователя."""
+    def show_bonus_balance(self, message):
         chat_id = message.chat.id
         user = self.users.get(chat_id)
         if user:
-            self.bot.send_message(
-                chat_id,
-                f"Ваш бонусный баланс: {user.balance:.2f} руб."
-            )
+            self.bot.send_message(chat_id, f"Ваш бонусный баланс: {user.bonus_points:.2f} руб.")
         else:
             self.bot.send_message(chat_id, "Вы не зарегистрированы. Используйте команду /start для регистрации.")
-
-    def get_cart(self, chat_id):
-        return self.carts.setdefault(chat_id, Cart())
 
     def process_payment(self, message):
         chat_id = message.chat.id
         cart = self.get_cart(chat_id)
         total = cart.get_total(self.menu.items)
-        user = self.users.setdefault(chat_id, User(chat_id))
-        
-        # Добавляем бонусы пользователю
-        bonus = total * 0.1
-        user.add_balance(bonus)
-        
-        # Очищаем корзину
-        cart.clear()
-        
-        # Сообщаем о результате оплаты
-        self.bot.send_message(
-            chat_id,
-            f'Оплата прошла успешно! Сумма: {total} руб. Вы получили {bonus:.2f} бонусов. Ваш общий баланс бонусов: {user.balance:.2f} руб.'
-        )
+        user = self.users.get(chat_id)
+
+        if total > 0:
+            # Начисляем бонусы
+            if user:
+                bonus = total * 0.1  # 10% от суммы заказа
+                user.add_bonus(bonus)
+                self.bot.send_message(chat_id, f"Вам начислено {bonus:.2f} бонусных рублей! Общий бонусный баланс: {user.bonus_points:.2f} руб.")
+
+            cart.clear()
+            self.bot.send_message(chat_id, f"С вас {total} руб. Спасибо за заказ!")
+        else:
+            self.bot.send_message(chat_id, "Ваша корзина пуста. Пожалуйста, добавьте блюда в корзину перед оплатой.")
+
+    def get_cart(self, chat_id):
+        if chat_id not in self.carts:
+            self.carts[chat_id] = Cart()
+        return self.carts[chat_id]
 
     def run(self):
-        self.bot.polling(none_stop=True)
+        self.bot.infinity_polling()
 
 
-# Запуск
-if __name__ == '__main__':
-    TOKEN = '7588996191:AAHsD186wzDG_ALZzjcDRWWA0KmcX3rFCQo'
+if __name__ == "__main__":
+    TOKEN = "7588996191:AAHsD186wzDG_ALZzjcDRWWA0KmcX3rFCQo"
     app = BotApp(TOKEN)
     app.run()
