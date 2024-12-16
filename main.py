@@ -126,13 +126,20 @@ class Menu:
             "Шоколадный фонтан с ванильным мороженым": "images/cokolate.jpeg",
         }
 
-class BotApp:
+
+class Users:
+    def __init__(self):
+        self.users = {}
+
+
+class BotApp(Users):
     """Основной класс приложения."""
     def __init__(self, token):
+        super().__init__()
         self.bot = telebot.TeleBot(token)
         self.database = DatabaseManager()
         self.menu = Menu()
-        self.users = {}
+        
         self.carts = {}
         self.waiting_for_removal = {}  
         self.current_selection = {}  # Добавляем атрибут для хранения текущих выборов пользователя
